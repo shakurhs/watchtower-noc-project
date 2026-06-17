@@ -16,28 +16,6 @@ Sebelum menjalankan proyek ini, pastikan sistem Anda telah memiliki perangkat lu
 - **Go** (Versi 1.20 atau lebih baru)
 - **Docker** dan **Docker Compose** (Digunakan untuk menjalankan server MinIO lokal)
 
-## Konfigurasi
-
-Proyek ini menggunakan dua file konfigurasi yang harus disiapkan secara lokal dan tidak boleh di-*commit* ke repositori.
-
-**1. Salin file template konfigurasi aplikasi:**
-
-```bash
-cp config.example.json config.json
-```
-
-Edit `config.json` sesuai kebutuhan lingkungan lokal Anda.
-
-**2. Salin file template variabel lingkungan:**
-
-```bash
-cp .env.example .env
-```
-
-Isi `.env` dengan kredensial MinIO yang Anda inginkan:
-
-MINIO_ROOT_USER=your_username
-MINIO_ROOT_PASSWORD=your_password
 
 ## Cara Menjalankan Aplikasi
 
