@@ -1,4 +1,4 @@
-import config
+package config
 
 import (
 		"encoding/json"
@@ -35,7 +35,7 @@ type Config struct {
 				ShutdownTimeoutSeconds int `json:"shutdown_timeout_seconds"`
 		} `json:"server"`
 }
-	LoadConfig(filename string) (*Config, error) {
+	func LoadConfig(filename string) (*Config, error) {
 		file, err := os.Open(filename)
 		if err != nil {
 				return nil, err

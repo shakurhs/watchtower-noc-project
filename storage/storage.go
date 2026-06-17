@@ -13,12 +13,28 @@ import (
 		"watchtower/models"
 )
 
-func InitMinio(endpoint, accessKey, secretKey string) (*minio.Clien, error) {
+func InitMinio(endpoint, accessKey, secretKey string) (*minio.Client, error) {
 		client, err := minio.New(endpoint, &minio.Options{
 				Creds: credentials.NewStaticV4(accessKey, secretKey, ""),
 				Secure: false,
 		})
 		return client, err
+}
+
+func EnsureBucketExists(ctx context.Context, client *minio.Client, bucketName string, region string) error{
+		exists, err := client.BucketExists(ctx , bucketName)
+		if err != nil {
+			return err
+		}
+
+		if !exists {
+				err = client.MakeBucket(ctx, bucketName, minio.MakeBucketOptions{Region: region})
+				if err != nil {
+					return err
+				}
+				log.Printf("Bucket '%s' berhasil dibuat otomatis!\n", bucketName)
+		}
+		return nil
 }
 
 func ArchiveRawEvent(ctx context.Context, client *minio.Client, bucketName string, dataPipe <-chan models.EventEnvelope) {
@@ -39,7 +55,7 @@ func ArchiveRawEvent(ctx context.Context, client *minio.Client, bucketName strin
 						now.Year(), now.Month(), now.Day(), now.Hour(), event.ID)
 
 				reader := bytes.NewReader(jsonData)
-				_, err = client.PutObject(ctx, bucketName, objectName, reader, int64(len(jsonData)), minio.putObjectOptions{
+				_, err = client.PutObject(ctx, bucketName, objectName, reader, int64(len(jsonData)), minio.PutObjectOptions{
 						ContentType: "application/json",
 				})
 
