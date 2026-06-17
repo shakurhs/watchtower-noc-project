@@ -5,6 +5,7 @@ import (
 		"fmt"
 		"math/rand"
 		"time"
+		"log"
 
 		"watchtower/models"
 )

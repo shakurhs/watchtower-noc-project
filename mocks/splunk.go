@@ -11,7 +11,14 @@ import (
 
 func GenerateSplunkData(ctx context.Context, dataPipe chan<- models.EventEnvelope) {
 	logLevels := []string{"INFO", "WARN", "ERROR"}
-	
+
+
+	messages := map[string]string{
+		"INFO":  "Service health check passed",
+		"WARN":  "High memory usage detected on node",
+		"ERROR": "Connection timeout to upstream service",
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -19,16 +26,18 @@ func GenerateSplunkData(ctx context.Context, dataPipe chan<- models.EventEnvelop
 			return
 		default:
 			level := logLevels[rand.Intn(len(logLevels))]
-			
+
 			event := models.EventEnvelope{
 				Version:   "1.0",
 				ID:        fmt.Sprintf("spl-%d", time.Now().UnixNano()),
 				Source:    "splunk",
 				Timestamp: time.Now().Unix(),
 				Payload: map[string]interface{}{
-					"log_level":   level,
-					"pos_node_id": fmt.Sprintf("kasir-%d", rand.Intn(5)+1),
-					"message":     "Transaksi sinkronisasi inventaris harian",
+					"log_level": level,
+					
+					"node_id": fmt.Sprintf("node-%d", rand.Intn(5)+1),
+					
+					"message": messages[level],
 				},
 			}
 
