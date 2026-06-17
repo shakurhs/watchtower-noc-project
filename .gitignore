@@ -1,0 +1,14 @@
+# File hasil kompilasi Go (Binaries)
+watchtower.exe
+watchtower
+
+# Folder lokal VS Code dan OS
+.vscode/
+.DS_Store
+
+# Data lokal MinIO (jika Anda memetakan volume Docker ke folder lokal)
+minio_data/
+
+# File konfigurasi yang mungkin berisi kredensial sensitif nantinya
+config.json 
+# (Untuk saat ini biarkan tidak di-ignore karena kita butuh untuk testing)
