@@ -8,8 +8,8 @@ services:
       - "9000:9000"   # Port untuk API S3 (diakses oleh aplikasi Go)
       - "9001:9001"   # Port untuk Web Console (diakses lewat browser)
     environment:
-      MINIO_ROOT_USER: watchtower_admin
-      MINIO_ROOT_PASSWORD: watchtower_password
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
