@@ -34,6 +34,7 @@ func main() {
 		// }
 
 		go mocks.GenerateDynatraceData(ctx, dataPipe)
-
+		go mocks.GeneratePrometheusData(ctx, dataPipe)
+		
 		select {}
 }
