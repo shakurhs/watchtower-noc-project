@@ -17,24 +17,24 @@ func GenerateDynatraceData(ctx context.Context, dataPipe chan<- models.EventEnve
 				return
 		default:
 
-			event:= models.EventEnvelope{
-					Version: 	"1.0",
-					ID:			fmt.Sprintf("dt-%d", time.Now().UnixNano()),
-					Source: 	"dynatrace",
-					Timestamp: 	time.Now().Unix(),
-					Payload:	map[string]interface{}{
-								"cpu_usage": rand.Float64() * 100,
-								"status":	 "OK",
+			event := models.EventEnvelope{
+			Version:   "1.0",
+			ID:        fmt.Sprintf("dt-%d", time.Now().UnixNano()),
+			Source:    "dynatrace",
+			Timestamp: time.Now().Unix(),
+			Payload: map[string]interface{}{
+				"cpu_usage":    rand.Float64() * 100,
+				"memory_usage": rand.Float64() * 100,
+				"status":       []string{"OK", "WARN", "CRITICAL"}[rand.Intn(3)],
+						},
+					}
 
-					},
-			}
+					select {
+					case dataPipe <- event:
+					default:
+						log.Printf("[DROP] Dynatrace channel full. Dropping packet ID: %s", event.ID)
+					}
 
-			select {
-			case dataPipe <- event:
-
-			default:
-
-			}
 			time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 		}
 	}
