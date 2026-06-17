@@ -20,10 +20,10 @@ func GenerateDynatraceData(ctx context.Context, dataPipe chan<- models.EventEnve
 			event:= models.EventEnvelope{
 					Version: 	"1.0",
 					ID:			fmt.Sprintf("dt-%d", time.Now().UnixNano()),
-					Source: 	"dynatrace"
+					Source: 	"dynatrace",
 					Timestamp: 	time.Now().Unix(),
 					Payload:	map[string]interface{}{
-								"cpu_usage": rand.Float() * 100,
+								"cpu_usage": rand.Float64() * 100,
 								"status":	 "OK",
 
 					},
