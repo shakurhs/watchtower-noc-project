@@ -43,3 +43,29 @@ Tahapan *Graceful Shutdown* yang dieksekusi:
 3.  **Channel Closure**: Menjalankan fungsi `close(ingestionChannel)` untuk mengunci pintu masuk channel.
 4.  **Drain & Process**: Memerintahkan modul `sync.WaitGroup` untuk menahan program tetap hidup sambil menunggu kumpulan consumer menyelesaikan pemrosesan log yang masih terjebak di dalam antrean channel.
 5.  **State Snapshot**: Meminta sistem menyimpan seluruh memori sementara (state deduplikasi dan dashboard) menjadi file flat-JSON ke dalam MinIO sebelum keluar ke OS.
+
+# Screening Pipeline & Worker Pool Architecture (Day 2)
+
+## 6. Worker Pool Architecture (Screening Layer)
+Untuk memproses aliran data dengan konkurensi tinggi tanpa memblokir (*blocking*) antrean ingestion, sistem mengimplementasikan pola arsitektur *Worker Pool* pada tahap pembersihan data.
+* **Concurrent Workers**: Sejumlah goroutine (ditentukan oleh variabel `screening.worker_count` di `config.json`) diluncurkan secara paralel menggunakan perulangan.
+* **Middleware Pattern**: Kumpulan *worker* ini bertindak sebagai *middleware* yang mencegat data dari produsen sebelum mencapai *storage*, bertugas memvalidasi dan menyaring paket log secara independen dari antrean utama.
+
+## 7. Stateful Deduplication (Concurrent Map & TTL)
+Sistem mencegah masuknya data ganda (duplikat) dengan melacak `ID` dari setiap log yang diproses. Karena data ini diakses secara serentak oleh banyak *worker*, penyimpanan *state* harus dijamin aman dari bentrokan (*race condition*).
+* **Thread-Safe Storage**: Menggunakan objek `sync.Map` bawaan Golang untuk melakukan operasi *Read/Write* secara atomik (`LoadOrStore`), menghindari kebutuhan *locking* manual (`sync.Mutex`) yang dapat memicu *bottleneck* performa.
+* **Time-To-Live (TTL) Eviction**: Setiap ID yang disimpan terikat pada batas waktu kedaluwarsa berdasarkan `screening.dedup_ttl_seconds` (standar: 60 detik). Jika log dengan ID yang sama masuk setelah masa TTL terlewati, sistem akan memperbarui stempel waktunya dan menganggapnya sebagai entitas baru. Ini bertindak sebagai mekanisme perlindungan terhadap *memory leak* seiring berjalannya waktu operasional server.
+
+## 8. Mekanisme Filter Noise & Validasi
+Setiap paket data mentah dievaluasi melalui serangkaian aturan bisnis sebelum diloloskan ke tahap pengarsipan. Data yang gagal memenuhi syarat akan langsung dibuang (*dropped via loop continuation*).
+* **Staleness Check**: Mencegah masuknya data usang atau *lagging logs*. Sistem menghitung selisih waktu (`time.Since`) antara waktu saat ini dengan `Timestamp` bawaan *payload*. Jika selisihnya melebihi `screening.noise_window_seconds`, data dilabeli sebagai *noise* dan dibuang.
+* **Severity & Logic Filtering**: Membuang data yang tidak memiliki nilai analitik tingkat lanjut, seperti log aplikasi dengan tingkat *severity* "DEBUG" atau nilai metrik yang teridentifikasi cacat dari sumbernya.
+
+## 9. Two-Tier Channel Orchestration
+Struktur perutean data dimodifikasi dari desain tunggal menjadi saluran ganda (*dual-channel*) untuk mematuhi prinsip Isolasi Tugas (*Separation of Concerns*) antara penerimaan dan pengarsipan.
+* **Ingestion Channel (`dataPipe`)**: Bertindak sebagai *buffer* primer yang hanya menerima data kotor langsung dari generator (Produsen). Channel ini secara eksklusif dikonsumsi oleh Goroutine *Worker Pool*.
+* **Screened Channel (`screenedPipe`)**: Bertindak sebagai *buffer* sekunder yang khusus menerima data yang terbukti valid setelah melewati *screening*. Goroutine *Archiver* dialihkan ke channel ini, memastikan ia hanya mengeksekusi operasi I/O ke MinIO untuk data yang sudah bersih.
+
+## 10. Automated Infrastructure Provisioning
+Sistem diatur agar memiliki tingkat kemandirian operasional (*self-provisioning*) guna menghindari kegagalan sistem saat pertama kali dideploy di lingkungan baru.
+* **Bucket Initialization**: Mengimplementasikan pengecekan absolut (`EnsureBucketExists`) yang dieksekusi tepat sebelum eksekusi *pipeline* asinkron. Jika *bucket* target (misal: `watchtower`) belum eksis di dalam *instance* MinIO, sistem akan secara otomatis membuatkannya berdasar parameter `storage.bucket` dan `storage.region`, mencegah *crash* akibat *pathing error*.
