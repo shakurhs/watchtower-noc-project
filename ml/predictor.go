@@ -1,6 +1,7 @@
 package ml
 
 import (
+	"math"
 	"sync"
 	"time"
 	"watchtower/models"
@@ -67,10 +68,23 @@ func (p *TrendPredictor) Predict(event models.EventEnvelope, metricName string, 
 
 	predictedValue := (slope * futureX) + intercept
 
+	var sumSquaredResiduals float64
+		for _, pt := range points {
+			predictedY := (slope * pt.X) + intercept
+			residual := pt.Y - predictedY
+			sumSquaredResiduals += residual * residual
+		}
+
+		variance := sumSquaredResiduals / (n - 2)
+		stdDev := math.Sqrt(variance)
+
+		confidenceInterval := stdDev
+
 	return &models.ForecastResult{
 		Source:      event.Source,
 		Metric:      metricName,
 		Predicted:   predictedValue,
+		ConfidenceInterval: confidenceInterval,
 		HorizonTime: futureTime,
 	}
 }

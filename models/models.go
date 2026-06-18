@@ -23,5 +23,6 @@ type ForecastResult struct {
 	Source      string    `json:"source"`
 	Metric      string    `json:"metric"`
 	Predicted   float64   `json:"predicted"`
+	ConfidenceInterval float64   `json:"confidence_interval"`
 	HorizonTime time.Time `json:"horizon_time"` // Waktu prediksi di masa depan 
 }
