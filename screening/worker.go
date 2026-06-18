@@ -7,16 +7,18 @@ import (
 
 	"watchtower/config"
 	"watchtower/models"
+	"watchtower/policy"
 )
 
 func StartWorkerPool(
 	ctx context.Context, 
 	cfg *config.Config, 
+	engine *policy.Engine,
 	ingestionChannel <-chan models.EventEnvelope, 
 	screenedChannel chan<- models.EventEnvelope, // Channel baru untuk data bersih
 	wg *sync.WaitGroup,
 ) {
-	processor := NewProcessor(cfg) 
+	processor := NewProcessor(cfg, engine) 
 
 	for i := 1; i <= cfg.Screening.WorkerCount; i++ {
 		wg.Add(1)

@@ -4,10 +4,12 @@ import (
 	"context"
 	"log"
 	"sync"
+	"time"
 
 	"watchtower/config"
 	"watchtower/mocks"
 	"watchtower/models"
+	"watchtower/policy"
 	"watchtower/screening"
 	"watchtower/storage"
 )
@@ -17,6 +19,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("Gagal memuat config: %v", err)
 		}
+
+		engine := policy.NewEngine("policy/screening.json")
+		engine.Watch(2 * time.Second)
 
 		minioClient, err:= storage.InitMinio(cfg.Storage.Endpoint,"watchtower_admin", "watchtower_password")
 		if err != nil {
@@ -38,7 +43,7 @@ func main() {
 
 		var wg sync.WaitGroup
 
-		screening.StartWorkerPool(ctx, cfg, dataPipe, screenedPipe, &wg)
+		screening.StartWorkerPool(ctx, cfg, engine, dataPipe, screenedPipe, &wg)
 
 		go storage.ArchiveRawEvent(ctx, minioClient, cfg.Storage.Bucket, screenedPipe)
 		// go func() {
