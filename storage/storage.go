@@ -65,3 +65,26 @@ func ArchiveRawEvent(ctx context.Context, client *minio.Client, bucketName strin
 			}
 	}
 }
+
+func SaveMLResult(ctx context.Context, client *minio.Client, bucketName string, prefix string, data interface{}) {
+	jsonData, err := json.Marshal(data)
+		if err != nil {
+			log.Printf("Gagal marshal data ML: %v\n", err)
+			return
+		}
+
+		now := time.Now()
+		fileName := fmt.Sprintf("%d.json", now.UnixNano())
+		
+		objectName := fmt.Sprintf("%s/%04d/%02d/%02d/%s", 
+			prefix, now.Year(), now.Month(), now.Day(), fileName)
+
+		reader := bytes.NewReader(jsonData)
+		_, err = client.PutObject(ctx, bucketName, objectName, reader, int64(len(jsonData)), minio.PutObjectOptions{
+			ContentType: "application/json",
+		})
+
+		if err != nil {
+			log.Printf("Gagal menyimpan %s ke MinIO: %v\n", objectName, err)
+	}
+}
