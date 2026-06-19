@@ -3,7 +3,7 @@
 
 Dokumen ini berisi langkah-langkah untuk menjalankan Project Watchtower dari awal. Sistem ini adalah pipeline data real-time untuk Network Operations Center (NOC) yang dibangun menggunakan Go. Panduan ini dibuat untuk memverifikasi semua fitur tanpa asumsi.
 
-## Prasyarat
+## Prerequisite
 
 Mesin harus memiliki software berikut:
 1. Golang (Versi 1.20 atau lebih baru).
