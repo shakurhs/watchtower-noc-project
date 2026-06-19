@@ -8,6 +8,7 @@ import (
 
 	"watchtower/config"
 	"watchtower/models"
+	"watchtower/policy"
 )
 
 func TestStartWorkerPool(t *testing.T) {
@@ -21,7 +22,8 @@ func TestStartWorkerPool(t *testing.T) {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(context.Background())
 
-	StartWorkerPool(ctx, cfg, ingestionChannel, screenedChannel, &wg)
+	policyEngine := policy.NewEngine("policy/screening.json")
+	StartWorkerPool(ctx, cfg, policyEngine, ingestionChannel, screenedChannel, &wg)
 
 	validEvent := models.EventEnvelope{ID: "evt-1", Timestamp: time.Now().Unix()}
 	duplicateEvent := models.EventEnvelope{ID: "evt-1", Timestamp: time.Now().Unix()} // ID sama persis

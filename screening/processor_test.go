@@ -6,13 +6,15 @@ import (
 
 	"watchtower/config"
 	"watchtower/models"
+	"watchtower/policy"
 )
 
 func TestIsDuplicate(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Screening.DedupTTLSeconds = 2
 
-	processor := NewProcessor(cfg)
+	policyEngine := policy.NewEngine("policy/screening.json")
+	processor := NewProcessor(cfg, policyEngine)
 
 	if processor.IsDuplicate("event-1") {
 		t.Errorf("Gagal: event-1 seharusnya belum menjadi duplikat saat pertama kali diproses")
@@ -31,7 +33,8 @@ func TestFilterNoise(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Screening.NoiseWindowSeconds = 5
 
-	processor := NewProcessor(cfg)
+	policyEngine := policy.NewEngine("policy/screening.json")
+	processor := NewProcessor(cfg, policyEngine)
 
 	validEvent := models.EventEnvelope{
 		Timestamp: time.Now().Unix(),

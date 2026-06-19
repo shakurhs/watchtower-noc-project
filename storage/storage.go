@@ -51,7 +51,7 @@ func ArchiveRawEvent(ctx context.Context, client *minio.Client, bucketName strin
 				}
 
 				now := time.Unix(event.Timestamp, 0)
-				objectName := fmt.Sprintf("events/raw/%04d/%02d/%02d/%s.json",
+				objectName := fmt.Sprintf("events/raw/%d/%02d/%02d/%02d/%s.json",
 						now.Year(), now.Month(), now.Day(), now.Hour(), event.ID)
 
 				reader := bytes.NewReader(jsonData)
