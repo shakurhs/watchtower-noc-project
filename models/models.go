@@ -8,6 +8,7 @@ type EventEnvelope struct {
 	Source     string      				`json:"source"`
 	Timestamp  int64   	 				`json:"timestamp"`
 	Payload    map[string]interface{}	`json:"payload"`
+	Priority	string					`json:"priority"`
 }
 
 type AnomalyResult struct {

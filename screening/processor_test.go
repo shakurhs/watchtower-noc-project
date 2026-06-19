@@ -1,19 +1,35 @@
 package screening
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"watchtower/config"
 	"watchtower/models"
 	"watchtower/policy"
+	"watchtower/storage"
 )
 
 func TestIsDuplicate(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Screening.DedupTTLSeconds = 2
 
-	policyEngine := policy.NewEngine("policy/screening.json")
+	// Setup MinIO
+	minioClient, err := storage.InitMinio("localhost:9000", "watchtower_admin", "watchtower_password")
+	if err != nil {
+		t.Fatalf("Gagal inisialisasi MinIO: %v", err)
+	}
+
+	ctx := context.Background()
+	bucketName := "watchtower-test"
+	
+	err = storage.EnsureBucketExists(ctx, minioClient, bucketName, "us-east-1")
+	if err != nil {
+		t.Fatalf("Gagal create bucket: %v", err)
+	}
+
+	policyEngine := policy.NewEngine("policy/screening.json", minioClient, bucketName)
 	processor := NewProcessor(cfg, policyEngine)
 
 	if processor.IsDuplicate("event-1") {
@@ -33,7 +49,21 @@ func TestFilterNoise(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Screening.NoiseWindowSeconds = 5
 
-	policyEngine := policy.NewEngine("policy/screening.json")
+	// Setup MinIO
+	minioClient, err := storage.InitMinio("localhost:9000", "watchtower_admin", "watchtower_password")
+	if err != nil {
+		t.Fatalf("Gagal inisialisasi MinIO: %v", err)
+	}
+
+	ctx := context.Background()
+	bucketName := "watchtower-test"
+	
+	err = storage.EnsureBucketExists(ctx, minioClient, bucketName, "us-east-1")
+	if err != nil {
+		t.Fatalf("Gagal create bucket: %v", err)
+	}
+
+	policyEngine := policy.NewEngine("policy/screening.json", minioClient, bucketName)
 	processor := NewProcessor(cfg, policyEngine)
 
 	validEvent := models.EventEnvelope{

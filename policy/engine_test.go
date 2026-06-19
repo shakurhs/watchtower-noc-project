@@ -1,22 +1,37 @@
 package policy
 
 import (
-	"os"
+	"context"
 	"testing"
 	"time"
+
+	"watchtower/storage"
 )
 
 func TestEngineLogic(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "screening_*.json")
+	minioClient, err := storage.InitMinio("localhost:9000", "watchtower_admin", "watchtower_password")
 	if err != nil {
-		t.Fatalf("Gagal membuat file temp: %v", err)
+		t.Fatalf("Gagal inisialisasi MinIO: %v", err)
 	}
-	defer os.Remove(tmpFile.Name()) // Pastikan file dihapus setelah test selesai
+
+	ctx := context.Background()
+	bucketName := "watchtower-test"
+	objectName := "policy/test-screening.json"
+
+	err = storage.EnsureBucketExists(ctx, minioClient, bucketName, "us-east-1")
+	if err != nil {
+		t.Fatalf("Gagal create bucket: %v", err)
+	}
 
 	initialJSON := `{"drop_keywords":["DEBUG"], "critical_sources":["splunk"]}`
-	os.WriteFile(tmpFile.Name(), []byte(initialJSON), 0644)
+	err = storage.SavePolicyToMinIO(ctx, minioClient, bucketName, objectName, []byte(initialJSON))
+	if err != nil {
+		t.Fatalf("Gagal upload policy: %v", err)
+	}
 
-	engine := NewEngine(tmpFile.Name())
+	time.Sleep(200 * time.Millisecond)
+
+	engine := NewEngine(objectName, minioClient, bucketName)
 
 	if !engine.ShouldDrop("ini log system dengan level DEBUG") {
 		t.Errorf("Gagal: Kata DEBUG seharusnya terdeteksi dan dibuang")
@@ -30,20 +45,44 @@ func TestEngineLogic(t *testing.T) {
 }
 
 func TestHotReload(t *testing.T) {
-	tmpFile, _ := os.CreateTemp("", "screening_*.json")
-	defer os.Remove(tmpFile.Name())
+	minioClient, err := storage.InitMinio("localhost:9000", "watchtower_admin", "watchtower_password")
+	if err != nil {
+		t.Fatalf("Gagal inisialisasi MinIO: %v", err)
+	}
+
+	ctx := context.Background()
+	bucketName := "watchtower-test"
+	objectName := "policy/test-hotreload.json"
+
+	err = storage.EnsureBucketExists(ctx, minioClient, bucketName, "us-east-1")
+	if err != nil {
+		t.Fatalf("Gagal create bucket: %v", err)
+	}
 
 	initialJSON := `{"drop_keywords":["DEBUG"]}`
-	os.WriteFile(tmpFile.Name(), []byte(initialJSON), 0644)
-
-	engine := NewEngine(tmpFile.Name())
-	engine.Watch(100 * time.Millisecond) // Cek perubahan sangat cepat (tiap 0.1 detik)
-
-	time.Sleep(50 * time.Millisecond)
-	newJSON := `{"drop_keywords":["TRACE"]}`
-	os.WriteFile(tmpFile.Name(), []byte(newJSON), 0644)
+	err = storage.SavePolicyToMinIO(ctx, minioClient, bucketName, objectName, []byte(initialJSON))
+	if err != nil {
+		t.Fatalf("Gagal upload initial policy: %v", err)
+	}
 
 	time.Sleep(200 * time.Millisecond)
+
+
+	engine := NewEngine(objectName, minioClient, bucketName)
+	
+	ctxWatch, cancelWatch := context.WithCancel(ctx)
+	defer cancelWatch()
+	go engine.Watch(ctxWatch, 100*time.Millisecond)
+
+	time.Sleep(50 * time.Millisecond)
+	
+	newJSON := `{"drop_keywords":["TRACE"]}`
+	err = storage.SavePolicyToMinIO(ctx, minioClient, bucketName, objectName, []byte(newJSON))	
+	if err != nil {
+		t.Fatalf("Gagal upload new policy: %v", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
 
 	if engine.ShouldDrop("log DEBUG") {
 		t.Errorf("Gagal: DEBUG seharusnya sudah TIDAK dibuang setelah hot-reload")

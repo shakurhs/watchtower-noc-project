@@ -1,4 +1,22 @@
 {
   "drop_keywords": ["DEBUG"],
-  "critical_sources": []
+  "critical_sources": ["dynatrace", "splunk"],
+  "priority_rules": {
+    "P1": {
+      "keywords": ["CRITICAL", "ERROR", "FATAL", "DOWN"],
+      "sources": []
+    },
+    "P2": {
+      "keywords": ["WARN", "HIGH", "SLOW", "DEGRADED"],
+      "sources": []
+    },
+    "P3": {
+      "keywords": ["INFO", "MEDIUM", "OK"],
+      "sources": []
+    },
+    "P4": {
+      "keywords": ["TRACE", "LOW"],
+      "sources": []
+    }
+  }
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"log"
 
 	"watchtower/config"
 	"watchtower/models"
@@ -14,11 +15,11 @@ func StartWorkerPool(
 	ctx context.Context, 
 	cfg *config.Config, 
 	engine *policy.Engine,
+	processor *Processor, 
 	ingestionChannel <-chan models.EventEnvelope, 
-	screenedChannel chan<- models.EventEnvelope, // Channel baru untuk data bersih
+	screenedChannel chan<- models.EventEnvelope,
 	wg *sync.WaitGroup,
 ) {
-	processor := NewProcessor(cfg, engine) 
 
 	for i := 1; i <= cfg.Screening.WorkerCount; i++ {
 		wg.Add(1)
@@ -35,10 +36,13 @@ func StartWorkerPool(
 						return
 					}
 
-					if processor.IsDuplicate(event.ID) || processor.FilterNoise(event) {
+					if processor.IsDuplicate(event.ID) || processor.FilterNoise(event) || processor.IsNoisy(event) {
 						continue
 					}
 
+					priority := processor.ClassifyPriority(event)
+					event.Priority = priority
+					log.Printf("[DEBUG Worker] Event ID: %s, Source: %s, Priority: %s", event.ID, event.Source, priority)
 					screenedChannel <- event
 				}
 			}

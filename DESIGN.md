@@ -1,71 +1,93 @@
-# Project Watchtower - Architecture & Design Document (Day 1)
+# Project Watchtower - Architecture & Design Document
 
 ## 1. Data Structures: EventEnvelope
-Semua data yang dihasilkan oleh empat mock source (Dynatrace, Splunk, Riverbed, dan Prometheus) akan dibungkus dalam struktur standar `EventEnvelope` sebelum dikirim ke channel ingestion. Hal ini memastikan pipeline pemrosesan yang seragam.
-
+Semua data yang dihasilkan oleh empat mock source (Dynatrace, Splunk, Riverbed, dan Prometheus) dibungkus dalam struktur standar `EventEnvelope` sebelum dikirim ke channel ingestion. Hal ini memastikan pipeline pemrosesan yang seragam.
 Struktur ini didefinisikan dengan tipe data ketat sebagai berikut:
-* **Version**: Field berjenis string yang wajib diisi untuk mencatat versi data yang masuk.
-* **ID**: Identifier unik berjenis string yang bertindak sebagai UUID.
-* **Source**: Field string untuk menandai sumber asal data (misalnya: "dynatrace" atau "splunk").
-* **Timestamp**: Waktu kejadian log yang dicatat dalam format integer 64-bit sebagai Unix timestamp.
-* **Payload**: Payload dinamis yang disesuaikan dengan sumber aslinya, menggunakan `map[string]interface{}` (setara dengan struktur JSON / Dictionary campuran di Python).
+- **Version**: Field berjenis string untuk mencatat versi data.
+- **ID**: Identifier unik berjenis string yang bertindak sebagai UUID.
+- **Source**: Field string untuk menandai sumber asal data.
+- **Timestamp**: Waktu kejadian log dalam format integer 64-bit (Unix timestamp).
+- **Payload**: Payload dinamis menggunakan `map[string]interface{}`.
+- **Priority**: Field string untuk klasifikasi severity (P1, P2, P3, P4).
 
 ## 2. Object Storage Key Schema
-Karena penggunaan database tidak diperbolehkan, seluruh state dan data akan disimpan secara *flat file* ke MinIO menggunakan skema path. Konsep path folder `YYYY/MM/DD` ini bertindak sebagai skema partisi waktu (mirip dengan partisi data di BigQuery) untuk efisiensi pembacaan data.
-
-* **Raw Events**: Data log mentah yang baru masuk akan diarsipkan secara asinkron di `/events/raw/YYYY/MM/DD/HH/<uuid>.json`.
-* **Screened Events**: Data bersih setelah melewati deduplikasi dan filter noise disimpan di `/events/screened/YYYY/MM/DD/HH/<uuid>.json`.
-* **Anomaly Outputs**: Keluaran hasil deteksi model Machine Learning terkait anomali disimpan di `/ml/anomalies/YYYY/MM/DD/<uuid>.json`.
-* **Forecasts**: Hasil dari algoritma prediksi *trend* metrik akan ditimpa (overwritten) setiap kali ada prediksi baru, dan disimpan di `/ml/forecasts/YYYY/MM/DD/<metric>.json`.
-* **State & Policy**: State operasional sistem seperti aturan aktif disematkan di `/policy/screening.json`, snapshot dashboard di `/state/dashboard.json`, dan data riwayat deduplikasi di `/dedup/window/<bucket>.json`.
+Seluruh state dan data disimpan secara flat file ke MinIO menggunakan skema path. Konsep path folder `YYYY/MM/DD` bertindak sebagai skema partisi waktu untuk efisiensi pembacaan data.
+- **Raw Events**: Data log mentah diarsipkan di `/events/raw/YYYY/MM/DD/HH/<uuid>.json`.
+- **Screened Events**: Data bersih setelah screening disimpan di `/events/screened/YYYY/MM/DD/HH/<uuid>.json`.
+- **Anomaly Outputs**: Keluaran deteksi ML disimpan di `/ml/anomalies/YYYY/MM/DD/<uuid>.json`.
+- **Forecasts**: Hasil prediksi trend disimpan di `/ml/forecasts/YYYY/MM/DD/<metric>.json`.
+- **State & Policy**: State operasional disimpan di `/policy/screening.json`, snapshot dashboard di `/state/dashboard.json`, dan data deduplikasi di `/dedup/window/<bucket>.json`.
 
 ## 3. Channel Buffer Strategy & Backpressure
-Mekanisme aliran data (Ingestion) dari sumber sistem menggunakan antrean tersentralisasi untuk mencegah sistem *crash* akibat lonjakan data mendadak.
-
-* **Buffer Size**: Sistem menggunakan satu buffered channel secara terpusat dengan ukuran antrean sebesar `2048`, angka ini diambil secara dinamis dari nilai `ingestion.channel_buffer_size`.
-* **Backpressure Drop**: Bila MinIO atau CPU lambat yang menyebabkan channel penuh, baris kode akan menggunakan operator `select` dengan opsi `default` untuk membuang paket log (dropped) dengan sengaja.
-* **Monitoring Drop**: Setiap peristiwa pembuangan paket ini harus dicatat ke dalam log terminal, menambahkan matriks metrik pembuangan (drop counter), dan wajib diekspos datanya ke web dashboard UI. Interval log pembuangan ini dieksekusi secara agregat setiap `5000` milidetik (`drop_log_interval_ms`).
+Mekanisme aliran data menggunakan antrean tersentralisasi untuk mencegah sistem crash akibat lonjakan data.
+- **Buffer Size**: Menggunakan satu buffered channel dengan ukuran antrean 2048, diambil dari nilai `ingestion.channel_buffer_size`.
+- **Backpressure Drop**: Bila channel penuh, sistem menggunakan operator `select` dengan opsi `default` untuk membuang paket log.
+- **Monitoring Drop**: Peristiwa pembuangan dicatat ke log terminal dan diekspos ke web dashboard UI.
 
 ## 4. Goroutine Ownership Map
-Untuk mematuhi aturan tidak ada bentrokan memori (sebagai lulus kriteria `go test -race`), batas tugas setiap concurrent goroutine dipetakan secara absolut:
-
-* **Producers (4 Goroutines)**: Terdiri dari empat goroutine independen yang memproduksi mock data dari masing-masing sistem dan menjadi satu-satunya penulis (*writer*) mutlak ke ingestion channel.
-* **Consumers / Worker Pool**: Sistem menyiapkan `4` buah goroutine worker paralel (`screening.worker_count`) yang berjalan bersamaan. Mereka membaca data dari channel lalu mengeksekusi pipeline screening seperti *deduplication* dan *noise filtering*.
-* **Storage Archiver (1 Goroutine)**: Satu buah goroutine terpisah yang mendengarkan *secondary channel* agar latensi penulisan HTTP/Network ke *storage* MinIO tidak memblokir antrean ingestion utama.
-* **Policy Poller (1 Goroutine)**: Satu goroutine yang terus-menerus mengecek status `screening.json` via ETag untuk keperluan *hot-reload* pengaturan aturan *screening* tanpa menghentikan pipeline.
+Batas tugas setiap concurrent goroutine dipetakan secara absolut untuk mematuhi aturan bebas race condition:
+- **Producers (4 Goroutines)**: Memproduksi mock data dan menjadi satu-satunya penulis ke ingestion channel.
+- **Consumers / Worker Pool**: 4 goroutine worker paralel yang membaca data dan mengeksekusi pipeline screening.
+- **Storage Archiver (2 Goroutines)**: Satu untuk raw events, satu untuk screened events, mendengarkan secondary channel.
+- **Policy Poller (1 Goroutine)**: Mengecek status policy di MinIO via ETag untuk hot-reload.
+- **ML & SSE Goroutines**: Memproses deteksi anomali, forecasting, dan broadcasting ke dashboard.
 
 ## 5. Graceful Shutdown Sequence
-Aplikasi Golang tidak boleh berhenti secara kasar saat dimatikan. Sistem diatur untuk selesai menutup dirinya (*clean exit*) dalam tenggat waktu maksimum `5` detik (`server.shutdown_timeout_seconds`). 
-
-Tahapan *Graceful Shutdown* yang dieksekusi:
-1.  **Signal Capture**: Menangkap peringatan interupsi sistem operasi dengan memantau `SIGINT` dan `SIGTERM`.
-2.  **Context Cancellation**: Menggunakan perintah `context.CancelFunc` yang dikirim ke semua produsen untuk menghentikan generator data mock secara bersamaan.
-3.  **Channel Closure**: Menjalankan fungsi `close(ingestionChannel)` untuk mengunci pintu masuk channel.
-4.  **Drain & Process**: Memerintahkan modul `sync.WaitGroup` untuk menahan program tetap hidup sambil menunggu kumpulan consumer menyelesaikan pemrosesan log yang masih terjebak di dalam antrean channel.
-5.  **State Snapshot**: Meminta sistem menyimpan seluruh memori sementara (state deduplikasi dan dashboard) menjadi file flat-JSON ke dalam MinIO sebelum keluar ke OS.
-
-# Screening Pipeline & Worker Pool Architecture (Day 2)
+Aplikasi diatur untuk selesai menutup dirinya dalam tenggat waktu maksimum 5 detik.
+- **Signal Capture**: Menangkap `SIGINT` dan `SIGTERM`.
+- **Context Cancellation**: Mengirim `context.CancelFunc` ke semua produsen.
+- **Channel Closure**: Menjalankan `close()` pada channel ingestion.
+- **Drain & Process**: Menggunakan `sync.WaitGroup` untuk menunggu consumer menyelesaikan pemrosesan.
+- **State Snapshot**: Menyimpan state deduplikasi dan dashboard ke MinIO sebelum keluar.
 
 ## 6. Worker Pool Architecture (Screening Layer)
-Untuk memproses aliran data dengan konkurensi tinggi tanpa memblokir (*blocking*) antrean ingestion, sistem mengimplementasikan pola arsitektur *Worker Pool* pada tahap pembersihan data.
-* **Concurrent Workers**: Sejumlah goroutine (ditentukan oleh variabel `screening.worker_count` di `config.json`) diluncurkan secara paralel menggunakan perulangan.
-* **Middleware Pattern**: Kumpulan *worker* ini bertindak sebagai *middleware* yang mencegat data dari produsen sebelum mencapai *storage*, bertugas memvalidasi dan menyaring paket log secara independen dari antrean utama.
+Sistem mengimplementasikan pola arsitektur Worker Pool pada tahap pembersihan data. Sejumlah goroutine diluncurkan secara paralel untuk memvalidasi dan menyaring paket log secara independen dari antrean utama.
 
 ## 7. Stateful Deduplication (Concurrent Map & TTL)
-Sistem mencegah masuknya data ganda (duplikat) dengan melacak `ID` dari setiap log yang diproses. Karena data ini diakses secara serentak oleh banyak *worker*, penyimpanan *state* harus dijamin aman dari bentrokan (*race condition*).
-* **Thread-Safe Storage**: Menggunakan objek `sync.Map` bawaan Golang untuk melakukan operasi *Read/Write* secara atomik (`LoadOrStore`), menghindari kebutuhan *locking* manual (`sync.Mutex`) yang dapat memicu *bottleneck* performa.
-* **Time-To-Live (TTL) Eviction**: Setiap ID yang disimpan terikat pada batas waktu kedaluwarsa berdasarkan `screening.dedup_ttl_seconds` (standar: 60 detik). Jika log dengan ID yang sama masuk setelah masa TTL terlewati, sistem akan memperbarui stempel waktunya dan menganggapnya sebagai entitas baru. Ini bertindak sebagai mekanisme perlindungan terhadap *memory leak* seiring berjalannya waktu operasional server.
+Sistem mencegah data ganda dengan melacak `ID` dari setiap log.
+- **Thread-Safe Storage**: Menggunakan `sync.Map` untuk operasi Read/Write atomik.
+- **Time-To-Live (TTL) Eviction**: ID terikat pada batas waktu kedaluwarsa berdasarkan `screening.dedup_ttl_seconds`. Jika log masuk setelah TTL terlewati, stempel waktu diperbarui.
 
 ## 8. Mekanisme Filter Noise & Validasi
-Setiap paket data mentah dievaluasi melalui serangkaian aturan bisnis sebelum diloloskan ke tahap pengarsipan. Data yang gagal memenuhi syarat akan langsung dibuang (*dropped via loop continuation*).
-* **Staleness Check**: Mencegah masuknya data usang atau *lagging logs*. Sistem menghitung selisih waktu (`time.Since`) antara waktu saat ini dengan `Timestamp` bawaan *payload*. Jika selisihnya melebihi `screening.noise_window_seconds`, data dilabeli sebagai *noise* dan dibuang.
-* **Severity & Logic Filtering**: Membuang data yang tidak memiliki nilai analitik tingkat lanjut, seperti log aplikasi dengan tingkat *severity* "DEBUG" atau nilai metrik yang teridentifikasi cacat dari sumbernya.
+Setiap paket data dievaluasi melalui serangkaian aturan bisnis.
+- **Staleness Check**: Menghitung selisih waktu antara waktu saat ini dengan `Timestamp`. Jika melebihi `noise_window_seconds`, data dibuang.
+- **Signature Sliding Window**: Membuat hash SHA256 dari payload. Jika hash yang sama muncul melebihi `signature_threshold` dalam window waktu, event dianggap noise dan dibuang.
+- **Severity Filtering**: Membuang data berdasarkan keyword yang didefinisikan dalam policy.
 
 ## 9. Two-Tier Channel Orchestration
-Struktur perutean data dimodifikasi dari desain tunggal menjadi saluran ganda (*dual-channel*) untuk mematuhi prinsip Isolasi Tugas (*Separation of Concerns*) antara penerimaan dan pengarsipan.
-* **Ingestion Channel (`dataPipe`)**: Bertindak sebagai *buffer* primer yang hanya menerima data kotor langsung dari generator (Produsen). Channel ini secara eksklusif dikonsumsi oleh Goroutine *Worker Pool*.
-* **Screened Channel (`screenedPipe`)**: Bertindak sebagai *buffer* sekunder yang khusus menerima data yang terbukti valid setelah melewati *screening*. Goroutine *Archiver* dialihkan ke channel ini, memastikan ia hanya mengeksekusi operasi I/O ke MinIO untuk data yang sudah bersih.
+- **Ingestion Channel**: Buffer primer yang menerima data kotor dari produsen.
+- **Screened Channel**: Buffer sekunder yang menerima data valid setelah screening.
 
 ## 10. Automated Infrastructure Provisioning
-Sistem diatur agar memiliki tingkat kemandirian operasional (*self-provisioning*) guna menghindari kegagalan sistem saat pertama kali dideploy di lingkungan baru.
-* **Bucket Initialization**: Mengimplementasikan pengecekan absolut (`EnsureBucketExists`) yang dieksekusi tepat sebelum eksekusi *pipeline* asinkron. Jika *bucket* target (misal: `watchtower`) belum eksis di dalam *instance* MinIO, sistem akan secara otomatis membuatkannya berdasar parameter `storage.bucket` dan `storage.region`, mencegah *crash* akibat *pathing error*.
+Sistem memiliki pengecekan absolut (`EnsureBucketExists`) yang dieksekusi sebelum pipeline berjalan. Jika bucket target belum eksis di MinIO, sistem akan membuatnya secara otomatis.
+
+## 11. Machine Learning & Predictions
+- **Anomaly Detection**: Menggunakan Exponential Moving Average (EMA) untuk menghitung baseline metrik. Deviasi yang melebihi ambang batas sigma (`anomaly_sigma_threshold`) memicu alert anomali.
+- **Forecasting**: Menggunakan Linear Regression pada window data terakhir (`regression_window_size`) untuk memprediksi nilai metrik di masa depan (`forecast_horizon_minutes`).
+
+## 12. Server-Sent Events (SSE) & Dashboard
+- **SSE Hub**: Menggunakan pola Hub-and-Spoke untuk mendistribusikan event, anomaly, dan forecast ke semua client yang terhubung via `/stream`.
+- **Dashboard UI**: Dibangun dengan HTML/CSS/JS murni tanpa framework. Menggunakan desain monochrome dengan aksen warna hanya untuk indikator status.
+- **P-Tier Classification**: Event diklasifikasikan secara dinamis menjadi P1 (Kritis), P2 (Warning), P3 (Info), dan P4 (Normal) berdasarkan keyword payload dan sumber data.
+
+## 13. Screened Event Archiving
+Event yang lolos screening tidak hanya dikirim ke dashboard dan ML, tetapi juga diarsipkan secara asinkron ke path `/events/screened/` di MinIO untuk keperluan audit trail.
+
+## 14. Apa yang salah (Evolusi Keputusan Desain)
+
+Bagian ini mendokumentasikan keputusan desain yang berubah selama proses pengembangan beserta alasannya.
+
+**Keputusan 1: Mekanisme Hot-Reload Policy**
+- **Desain Awal**: Policy engine membaca file `screening.json` dari sistem file lokal dan melakukan polling menggunakan `os.Stat` untuk mengecek `ModTime` (waktu modifikasi file).
+- **Perubahan**: Mekanisme diubah total untuk membaca policy dari object storage MinIO dan melakukan polling menggunakan `StatObject` untuk mengecek `ETag`.
+- **Alasan**: Brief proyek secara eksplisit melarang penggunaan state lokal ("Penyimpanan hanya menggunakan object storage"). Polling file lokal melanggar constraint ini dan akan gagal bekerja jika aplikasi di-deploy di lingkungan terdistribusi atau containerized di mana file lokal tidak tersinkronisasi antar instance. ETag polling di MinIO lebih andal dan sesuai dengan arsitektur stateless.
+
+**Keputusan 2: Logika Filter Noise**
+- **Desain Awal**: Filter noise hanya mengandalkan pengecekan timestamp usang (staleness check) dan pembuangan keyword sederhana.
+- **Perubahan**: Ditambahkan mekanisme Signature Sliding Window. Payload di-hash menggunakan SHA256, dan frekuensi hash yang sama dilacak dalam window waktu tertentu.
+- **Alasan**: Pengecekan timestamp saja gagal menangkap "stuck metrics", yaitu kondisi di mana sumber data terus-menerus mengirimkan nilai metrik yang persis sama (misalnya status "OK" yang tidak berubah) dengan ID yang berbeda. Signature hashing secara efektif menekan redundansi payload yang tidak memberikan nilai analitik baru.
+
+**Keputusan 3: Klasifikasi Prioritas Event (P-Tier)**
+- **Desain Awal**: Semua event yang lolos screening ditampilkan secara seragam di dashboard tanpa perbedaan visual tingkat urgensi.
+- **Perubahan**: Menambahkan field `Priority` pada `EventEnvelope` dan mengimplementasikan engine klasifikasi yang memetakan keyword payload dan sumber data ke tingkat P1 hingga P4.
+- **Alasan**: Dashboard NOC (Network Operations Center) membutuhkan triase visual yang cepat. Menampilkan semua event dengan format yang sama menyebabkan alert fatigue dan menyulitkan operator untuk mengidentifikasi insiden kritis secara instan. Badge berwarna pada P-tier memberikan konteks urgensi secara langsung.

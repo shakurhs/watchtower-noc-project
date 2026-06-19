@@ -15,6 +15,7 @@ type Config struct {
 				WorkerCount int `json:"worker_count"`
 				DedupTTLSeconds int `json:"dedup_ttl_seconds"`
 				NoiseWindowSeconds int `json:"noise_window_seconds"`
+				SignatureThreshold int `json:"noise_signature_threshold"`
 		} `json:"screening"`
 
 		ML struct {
