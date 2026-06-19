@@ -1,4 +1,3 @@
-```markdown
 # Project Watchtower
 
 Dokumen ini berisi langkah-langkah untuk menjalankan Project Watchtower dari awal. Sistem ini adalah pipeline data real-time untuk Network Operations Center (NOC) yang dibangun menggunakan Go. Panduan ini dibuat untuk memverifikasi semua fitur tanpa asumsi.
@@ -117,4 +116,3 @@ Pastikan tidak ada kata FAIL di output.
 | `state/` | In-memory state untuk dashboard (dengan thread-safe mutex). |
 
 Untuk penjelasan mendalam mengenai arsitektur dan evolusi keputusan desain, baca [Dokumen Desain Sistem (DESIGN.md)](./DESIGN.md).
-```
